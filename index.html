@@ -420,8 +420,16 @@ function App() {
     e.target.value = "";
   };
 
+  const taskPointsMap = state.tasks.reduce((map, t) => {
+    map[t.id] = t.points || 0;
+    return map;
+  }, {});
   const totalStamps = Object.values(state.completions).reduce(
-    (sum, day) => sum + Object.values(day).filter((v) => v.done).length,
+    (sum, day) =>
+      sum + Object.entries(day).reduce(
+        (daySum, [taskId, v]) => daySum + (v.done ? (taskPointsMap[taskId] || 0) : 0),
+        0
+      ),
     0
   );
 
@@ -572,7 +580,7 @@ function TaskCard({ task, done, verified, onToggle, onVerify, onPhoto, photoUrl,
 }
 
 function TodayView({ dateKey, tasks, completions, onToggle, onVerify, onPhoto, photos, onLoadPhoto, totalStamps }) {
-  const undone = tasks.filter((t) => !completions[t.id]?.done);
+  const undone = tasks.filter((t) => t.type === "daily" && !completions[t.id]?.done);
   const isEvening = new Date().getHours() >= 18;
   return (
     <div>
