@@ -18,12 +18,49 @@
   html, body { margin: 0; padding: 0; }
   * { box-sizing: border-box; }
   button { font-family: inherit; }
+  #fatal-error-banner {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 99999;
+    background: #D64545;
+    color: #fff;
+    font-family: sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 10px 14px;
+    white-space: pre-wrap;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+  }
 </style>
 </head>
 <body>
+<div id="fatal-error-banner"></div>
 <div id="root">
   <p style="text-align:center;margin-top:40px;font-family:sans-serif;color:#888;">読み込み中…</p>
 </div>
+
+<script>
+  // ============================================================
+  // グローバルエラーハンドリング
+  //   JSの実行中にエラーが発生した場合、コンソールに出るだけで
+  //   画面が「読み込み中…」のまま無言で止まらないよう、
+  //   画面上部に赤いバナーで表示します。
+  // ============================================================
+  function showFatalError(message) {
+    var banner = document.getElementById("fatal-error-banner");
+    if (!banner) return;
+    banner.style.display = "block";
+    banner.textContent = "⚠️ エラーが発生しました： " + message;
+  }
+  window.addEventListener("error", function (e) {
+    showFatalError((e && e.message) || String(e));
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    var reason = e && e.reason;
+    showFatalError((reason && reason.message) || String(reason));
+  });
+</script>
 
 <script>
   // ============================================================
@@ -45,20 +82,31 @@
     appId: "1:696597156812:web:65f1bb4338dfb7965e8369"
   };
 
-  firebase.initializeApp(firebaseConfig);
-  const db = firebase.database();
+  // db の初期化に失敗しても画面が固まらないよう、必ずtry/catchで囲む
+  let db = null;
+  window.__FIREBASE_INIT_ERROR__ = null;
+  try {
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.database();
+  } catch (e) {
+    window.__FIREBASE_INIT_ERROR__ = e.message || String(e);
+    showFatalError(window.__FIREBASE_INIT_ERROR__);
+  }
 
   // window.storage 互換のヘルパー（第2引数のsharedは使わず常に共有データとして扱う）
   async function storageGet(key) {
+    if (!db) throw new Error("Firebaseが初期化されていません");
     const snap = await db.ref(key).once("value");
     if (!snap.exists()) return null;
     return { key, value: snap.val(), shared: true };
   }
   async function storageSet(key, value) {
+    if (!db) throw new Error("Firebaseが初期化されていません");
     await db.ref(key).set(value);
     return { key, value, shared: true };
   }
   async function storageDelete(key) {
+    if (!db) throw new Error("Firebaseが初期化されていません");
     await db.ref(key).remove();
     return { key, deleted: true, shared: true };
   }
@@ -177,6 +225,7 @@ function WarriorCharacter({ points }) {
 function App() {
   const [state, setState] = useState(DEFAULT_STATE);
   const [loaded, setLoaded] = useState(false);
+  const [errorMsg, setErrorMsg] = useState(window.__FIREBASE_INIT_ERROR__ || null);
   const [view, setView] = useState("today");
   const [calMonth, setCalMonth] = useState(() => {
     const n = new Date();
@@ -192,10 +241,19 @@ function App() {
   // Firebase Realtime Database の「state」を常時購読。
   // 家族の誰かが更新すると、他の端末にも自動で反映されます。
   useEffect(() => {
+    // Firebaseの初期化自体に失敗している場合は、接続を試みず即エラー表示にする
+    if (!db) {
+      setErrorMsg(window.__FIREBASE_INIT_ERROR__ || "Firebaseの初期化に失敗しました");
+      setLoaded(true);
+      return;
+    }
+
+    let settled = false;
     const stateRef = db.ref("state");
     const listener = stateRef.on(
       "value",
       (snap) => {
+        settled = true;
         if (snap.exists()) {
           try {
             const raw = snap.val();
@@ -203,6 +261,7 @@ function App() {
             setState(parsed);
           } catch (e) {
             console.error("データの読み込みに失敗しました", e);
+            setErrorMsg("保存されているデータの形式が正しくありません: " + (e.message || e));
           }
           setLoaded(true);
         } else {
@@ -210,17 +269,41 @@ function App() {
             tasks: SEED_TASKS.map((t, i) => ({ id: `seed-${i}`, ...t })),
             completions: {},
           };
-          stateRef.set(JSON.stringify(seeded)).catch((e) => console.error("初期クエストの保存に失敗しました", e));
+          stateRef.set(JSON.stringify(seeded)).catch((e) => {
+            console.error("初期クエストの保存に失敗しました", e);
+            setErrorMsg("初期データの保存に失敗しました: " + (e.message || e));
+          });
           setState(seeded);
           setLoaded(true);
         }
       },
       (error) => {
+        settled = true;
         console.error("Firebaseとの接続に失敗しました", error);
+        setErrorMsg(
+          "Firebaseとの接続に失敗しました: " +
+            (error.message || error) +
+            "\nRealtime Databaseのルール（読み書き権限）を確認してください。"
+        );
         setLoaded(true);
       }
     );
-    return () => stateRef.off("value", listener);
+
+    // 一定時間たっても応答がなければ「読み込み中…」で無言停止させず、
+    // タイムアウトとして知らせる
+    const timeoutId = setTimeout(() => {
+      if (!settled) {
+        setErrorMsg(
+          "Firebaseからの応答がありません（タイムアウト）。ネットワーク接続や、Realtime Databaseのルール・URLを確認してください。"
+        );
+        setLoaded(true);
+      }
+    }, 10000);
+
+    return () => {
+      stateRef.off("value", listener);
+      clearTimeout(timeoutId);
+    };
   }, []);
 
   const saveState = useCallback(async (next) => {
@@ -343,6 +426,17 @@ function App() {
   const todayDue = getDueTasks(todayKey());
   const todayCompletions = state.completions[todayKey()] || {};
   const undoneCount = todayDue.filter((t) => !todayCompletions[t.id]?.done).length;
+
+  if (errorMsg) {
+    return (
+      <div style={{ background: PALETTE.sand, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <div style={{ background: "white", borderRadius: 18, padding: "20px 22px", maxWidth: 420, boxShadow: "0 4px 16px rgba(0,0,0,0.1)", border: `2px solid ${PALETTE.melon}` }}>
+          <p style={{ margin: "0 0 8px", fontWeight: 800, color: PALETTE.melon, fontSize: 16 }}>⚠️ 読み込みに失敗しました</p>
+          <p style={{ margin: 0, fontSize: 13, color: PALETTE.navy, whiteSpace: "pre-wrap" }}>{errorMsg}</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!loaded) {
     return (
@@ -632,8 +726,12 @@ function SettingsView({ tasks, onAdd, onRemove }) {
 }
 
 
-const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(<App />);
+try {
+  const root = ReactDOM.createRoot(document.getElementById("root"));
+  root.render(<App />);
+} catch (e) {
+  showFatalError(e.message || String(e));
+}
 </script>
 </body>
 </html>
