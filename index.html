@@ -429,6 +429,10 @@ function App() {
     map[t.id] = t.points || 0;
     return map;
   }, {});
+  const totalCompletedCount = Object.values(state.completions).reduce(
+    (sum, day) => sum + Object.values(day).filter((v) => v.done).length,
+    0
+  );
   const totalStamps = Object.values(state.completions).reduce(
     (sum, day) =>
       sum + Object.entries(day).reduce(
@@ -474,7 +478,7 @@ function App() {
         <h1 style={{ margin: "4px 0 14px", fontSize: 26, fontWeight: 800 }}>夏休みクエストボード</h1>
         <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.18)", padding: "8px 14px", borderRadius: 999 }}>
           <Star size={18} fill={PALETTE.sun} color={PALETTE.sun} />
-          <span style={{ fontWeight: 800, fontSize: 18 }}>{totalStamps}</span>
+          <span style={{ fontWeight: 800, fontSize: 18 }}>{totalCompletedCount}</span>
           <span style={{ fontSize: 13, opacity: 0.9 }}>個のスタンプ集めたよ！</span>
         </div>
         <div style={{ marginTop: 10, display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.18)", padding: "6px 12px", borderRadius: 999, marginLeft: 8 }}>
