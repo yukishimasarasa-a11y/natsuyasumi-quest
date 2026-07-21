@@ -6,10 +6,10 @@
 <title>夏休みクエストボード</title>
 
 <!-- React -->
-<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
 <!-- JSXをブラウザ内で変換（ビルド不要） -->
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.24.7/babel.min.js"></script>
 <!-- Firebase（Realtime Database） -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
@@ -54,7 +54,11 @@
     banner.textContent = "⚠️ エラーが発生しました： " + message;
   }
   window.addEventListener("error", function (e) {
-    showFatalError((e && e.message) || String(e));
+    var loc = "";
+    if (e && e.filename) {
+      loc = " (" + e.filename.split("/").pop() + ":" + e.lineno + ":" + e.colno + ")";
+    }
+    showFatalError(((e && e.message) || String(e)) + loc);
   });
   window.addEventListener("unhandledrejection", function (e) {
     var reason = e && e.reason;
